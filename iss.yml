@@ -1,5 +1,5 @@
 ---
-- name: Verificar sitios IIS y Versiones de .NET
+- name: Auditoría de IIS y .NET
   hosts: all
   gather_facts: false
   vars:
@@ -8,27 +8,34 @@
     ansible_winrm_port: 5985
     ansible_winrm_scheme: http
     ansible_winrm_server_cert_validation: ignore
-    ansible_become: false
 
   tasks:
-    - name: Listar sitios IIS
+    - name: Obtener Sitios IIS con Bindings y Versiones .NET
       ansible.windows.win_shell: |
+        # 1. Obtener Sitios y sus Bindings de forma limpia
         Import-Module WebAdministration
-        Get-Website | Select-Object Name, State, PhysicalPath | ConvertTo-Json
-      register: sitios
-
-    - name: Obtener versiones de .NET Instaladas
-      ansible.windows.win_shell: |
-        $dotnet_info = @{
-            Framework_4x = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full").Version
-            DotNet_Core_Runtimes = (dotnet --list-runtimes | Out-String)
+        $sitios = Get-Website | Select-Object Name, State, PhysicalPath, @{
+            Name = 'Bindings'
+            Expression = { ($_.Bindings.Collection | ForEach-Object { $_.bindingInformation }) -join ' | ' }
         }
-        $dotnet_info | ConvertTo-Json
-      register: dotnet_version
-      failed_when: false # Evita que falle si 'dotnet' no está en el PATH
 
-    - name: Mostrar Informe Consolidado
+        # 2. Obtener Versiones de .NET y limpiar el string (solo nombres y versiones)
+        $rawRuntimes = dotnet --list-runtimes
+        $cleanRuntimes = $rawRuntimes | ForEach-Object {
+            # Limpiamos la ruta entre corchetes para que solo quede el nombre y versión
+            $_ -replace ' \[.*\]', ''
+        }
+
+        # 3. Consolidar todo el reporte
+        $reporte = @{
+            IIS_Websites = $sitios
+            DotNet_Framework = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue).Version
+            DotNet_Core_Modern = $cleanRuntimes
+        }
+
+        $reporte | ConvertTo-Json
+      register: auditoria
+
+    - name: Resultado Final
       debug:
-        msg: 
-          Sitios_IIS: "{{ sitios.stdout | from_json }}"
-          Versiones_NET: "{{ dotnet_version.stdout | from_json }}"
+        var: auditoria.stdout | from_json
