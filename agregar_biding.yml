@@ -1,0 +1,41 @@
+---
+- name: Agregar Binding a Sitio IIS Existente
+  hosts: all
+  gather_facts: false
+  vars:
+    # Estas variables serán proporcionadas por el Survey de AWX
+    # site_name: "AS_DollarPeriodreport"
+    # binding_port: "8080"
+    # binding_host: "misitio.com"
+    ansible_connection: winrm
+    ansible_winrm_transport: ntlm
+    ansible_winrm_port: 5985
+    ansible_winrm_scheme: http
+    ansible_winrm_server_cert_validation: ignore
+
+  tasks:
+    - name: Validar que el sitio existe antes de proceder
+      ansible.windows.win_shell: |
+        Import-Module WebAdministration
+        if (Test-Path "IIS:\Sites\{{ site_name }}") { exit 0 } else { exit 1 }
+      register: site_check
+      failed_when: site_check.rc != 0
+
+    - name: Agregar nuevo binding al sitio
+      community.windows.win_iis_webbinding:
+        name: "{{ site_name }}"
+        port: "{{ binding_port }}"
+        host_header: "{{ binding_host | default(omit) }}"
+        protocol: http
+        state: present
+      register: binding_result
+
+    - name: Reiniciar el sitio para aplicar cambios (Opcional)
+      community.windows.win_iis_website:
+        name: "{{ site_name }}"
+        state: restarted
+      when: binding_result.changed
+
+    - name: Confirmación de cambios
+      debug:
+        msg: "Se ha agregado exitosamente el binding {{ binding_host }}:{{ binding_port }} al sitio {{ site_name }}"
