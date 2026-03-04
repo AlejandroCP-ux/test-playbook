@@ -1,5 +1,5 @@
 ---
-- name: Auditoría de IIS y .NET
+- name: Inventario Centralizado de Servidores Web (IIS, .NET, Software y Roles)
   hosts: all
   gather_facts: false
   vars:
@@ -10,32 +10,44 @@
     ansible_winrm_server_cert_validation: ignore
 
   tasks:
-    - name: Obtener Sitios IIS con Bindings y Versiones .NET
+    - name: Recolectar datos de inventario completo
       ansible.windows.win_shell: |
-        # 1. Obtener Sitios y sus Bindings de forma limpia
+        # 1. Obtener Sitios IIS y sus Bindings de forma limpia
         Import-Module WebAdministration
         $sitios = Get-Website | Select-Object Name, State, PhysicalPath, @{
             Name = 'Bindings'
             Expression = { ($_.Bindings.Collection | ForEach-Object { $_.bindingInformation }) -join ' | ' }
         }
 
-        # 2. Obtener Versiones de .NET y limpiar el string (solo nombres y versiones)
-        $rawRuntimes = dotnet --list-runtimes
-        $cleanRuntimes = $rawRuntimes | ForEach-Object {
-            # Limpiamos la ruta entre corchetes para que solo quede el nombre y versión
-            $_ -replace ' \[.*\]', ''
+        # 2. Obtener Versiones de .NET Core/Modernas (limpiando rutas)
+        $dotnetCore = (dotnet --list-runtimes 2>$null) | ForEach-Object { 
+            $_ -replace ' \[.*\]', '' 
         }
 
-        # 3. Consolidar todo el reporte
-        $reporte = @{
-            IIS_Websites = $sitios
-            DotNet_Framework = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue).Version
-            DotNet_Core_Modern = $cleanRuntimes
+        # 3. Obtener Roles y Características de Windows (solo instaladas)
+        $features = Get-WindowsFeature | Where-Object { $_.Installed } | Select-Object Name, DisplayName
+
+        # 4. Inventario de Software instalado (Programas)
+        $software = Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* , 
+                                    HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.DisplayName } | 
+                    Select-Object @{Name='Programa';Expression={$_.DisplayName}}, @{Name='Version';Expression={$_.DisplayVersion}}
+
+        # 5. Crear el objeto de reporte final
+        $reporte = [PSCustomObject]@{
+            Servidor           = $env:COMPUTERNAME
+            Fecha_Auditoria    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
+            IIS_Websites       = $sitios
+            DotNet_Framework_4 = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full" -ErrorAction SilentlyContinue).Version
+            DotNet_Core_Modern = $dotnetCore
+            Windows_Features   = $features
+            Software_Instalado = $software
         }
 
-        $reporte | ConvertTo-Json
-      register: auditoria
+        # Convertir a JSON con profundidad suficiente para no perder datos
+        $reporte | ConvertTo-Json -Depth 10
+      register: inventario_resultado
 
-    - name: Resultado Final
+    - name: Publicar Inventario en AWX
       debug:
-        var: auditoria.stdout | from_json
+        msg: "{{ inventario_resultado.stdout | from_json }}"
