@@ -1,0 +1,7 @@
+---
+- name: Prueba Ping
+  hosts: all
+  become: yes
+  tasks:
+    - name: Ping a los servidores
+      ping:
