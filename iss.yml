@@ -9,6 +9,7 @@
     ansible_winrm_scheme: http
     ansible_winrm_server_cert_validation: ignore
     ansible_winrm_kerberos_delegation: true
+    ansible_winrm_realm: BOOKIE.INT
     ansible_become: false
 
   tasks:
