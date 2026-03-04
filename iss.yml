@@ -1,5 +1,5 @@
 ---
-- name: Verificar sitios IIS
+- name: Verificar sitios IIS y Versiones de .NET
   hosts: all
   gather_facts: false
   vars:
@@ -11,12 +11,24 @@
     ansible_become: false
 
   tasks:
-    - name: Listar todos los sitios IIS y su estado
+    - name: Listar sitios IIS
       ansible.windows.win_shell: |
         Import-Module WebAdministration
         Get-Website | Select-Object Name, State, PhysicalPath | ConvertTo-Json
       register: sitios
 
-    - name: Mostrar resultado
+    - name: Obtener versiones de .NET Instaladas
+      ansible.windows.win_shell: |
+        $dotnet_info = @{
+            Framework_4x = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full").Version
+            DotNet_Core_Runtimes = (dotnet --list-runtimes | Out-String)
+        }
+        $dotnet_info | ConvertTo-Json
+      register: dotnet_version
+      failed_when: false # Evita que falle si 'dotnet' no está en el PATH
+
+    - name: Mostrar Informe Consolidado
       debug:
-        msg: "{{ sitios.stdout | from_json }}"
+        msg: 
+          Sitios_IIS: "{{ sitios.stdout | from_json }}"
+          Versiones_NET: "{{ dotnet_version.stdout | from_json }}"
