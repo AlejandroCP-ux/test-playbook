@@ -7,21 +7,15 @@
     ansible_winrm_transport: basic
     ansible_winrm_port: 5985
     ansible_winrm_server_cert_validation: ignore
+    ansible_become: false
 
   tasks:
-    - name: Obtener estado de los sitios IIS
-      community.windows.win_iis_website:
-        name: "Default Web Site"
-        state: started
-      register: iis_result
-      check_mode: yes
-
     - name: Listar todos los sitios IIS y su estado
       ansible.windows.win_shell: |
         Import-Module WebAdministration
-        Get-Website | Select-Object Name, State, PhysicalPath, @{n='Port';e={$_.bindings.collection.bindingInformation}} | ConvertTo-Json
+        Get-Website | Select-Object Name, State, PhysicalPath | ConvertTo-Json
       register: sitios
 
-    - name: Mostrar sitios
+    - name: Mostrar resultado
       debug:
         msg: "{{ sitios.stdout | from_json }}"
